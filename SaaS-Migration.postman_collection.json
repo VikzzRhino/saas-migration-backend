@@ -1,0 +1,387 @@
+{
+  "info": {
+    "name": "SaaS Migration Backend",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl",     "value": "http://localhost:7070" },
+    { "key": "apiKey",      "value": "" },
+    { "key": "migrationId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "01 - Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 - Tenants",
+      "item": [
+        {
+          "name": "Create Tenant",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.apiKey) pm.collectionVariables.set('apiKey', res.apiKey);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/tenants",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "tenants"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Acme Corp\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "Get Current Tenant",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/tenants/current",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "tenants", "current"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 - Migrations",
+      "item": [
+        {
+          "name": "03.1 - Setup",
+          "item": [
+            {
+              "name": "Create Migration",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "const res = pm.response.json();",
+                      "if (res._id) pm.collectionVariables.set('migrationId', res._id);"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "x-api-key",    "value": "{{apiKey}}" }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/migrations",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "migrations"]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"source\": {\n    \"system\": \"servicenow\",\n    \"credentials\": {\n      \"instanceUrl\": \"https://dev290528.service-now.com\",\n      \"username\": \"admin\",\n      \"password\": \"your_sn_password\"\n    }\n  },\n  \"target\": {\n    \"system\": \"freshservice\",\n    \"credentials\": {\n      \"domain\": \"your-domain\",\n      \"apiKey\": \"your_fs_api_key\"\n    }\n  }\n}",
+                  "options": { "raw": { "language": "json" } }
+                }
+              }
+            },
+            {
+              "name": "List Migrations",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
+                "url": {
+                  "raw": "{{baseUrl}}/api/migrations",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "migrations"]
+                }
+              }
+            },
+            {
+              "name": "Get Migration",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
+                "url": {
+                  "raw": "{{baseUrl}}/api/migrations/{{migrationId}}",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "migrations", "{{migrationId}}"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "03.2 - Verification",
+          "item": [
+            {
+              "name": "Verify Source",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
+                "url": {
+                  "raw": "{{baseUrl}}/api/migrations/{{migrationId}}/verify-source",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "migrations", "{{migrationId}}", "verify-source"]
+                }
+              }
+            },
+            {
+              "name": "Verify Target",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
+                "url": {
+                  "raw": "{{baseUrl}}/api/migrations/{{migrationId}}/verify-target",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "migrations", "{{migrationId}}", "verify-target"]
+                }
+              }
+            },
+            {
+              "name": "Preflight Estimate",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
+                "url": {
+                  "raw": "{{baseUrl}}/api/migrations/{{migrationId}}/preflight",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "migrations", "{{migrationId}}", "preflight"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "03.3 - Execution",
+          "item": [
+            {
+              "name": "Start Migration",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "x-api-key",    "value": "{{apiKey}}" }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/migrations/{{migrationId}}/start",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "migrations", "{{migrationId}}", "start"]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"objectConfig\": {\n    \"companies\":     false,\n    \"users\":         false,\n    \"admins\":        false,\n    \"incidents\":     true,\n    \"changes\":       false,\n    \"problems\":      false,\n    \"kb_categories\": false,\n    \"kb_folders\":    false,\n    \"kb_articles\":   false,\n    \"comments\":      false,\n    \"attachments\":   false\n  }\n}",
+                  "options": { "raw": { "language": "json" } }
+                }
+              }
+            },
+            {
+              "name": "Pause Migration",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
+                "url": {
+                  "raw": "{{baseUrl}}/api/migrations/{{migrationId}}/pause",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "migrations", "{{migrationId}}", "pause"]
+                }
+              }
+            },
+            {
+              "name": "Get Migration Status",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
+                "url": {
+                  "raw": "{{baseUrl}}/api/migrations/{{migrationId}}/status",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "migrations", "{{migrationId}}", "status"]
+                }
+              }
+            },
+            {
+              "name": "Retry Failed",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "x-api-key",    "value": "{{apiKey}}" }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/migrations/{{migrationId}}/retry-failed",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "migrations", "{{migrationId}}", "retry-failed"]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": { "raw": { "language": "json" } }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "03.4 - Diagnostics",
+          "item": [
+            {
+              "name": "Sample Data - Incidents",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
+                "url": {
+                  "raw": "{{baseUrl}}/api/migrations/{{migrationId}}/sample?object=incidents&limit=2",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "migrations", "{{migrationId}}", "sample"],
+                  "query": [
+                    { "key": "object", "value": "incidents" },
+                    { "key": "limit",  "value": "2" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Sample Data - Users",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
+                "url": {
+                  "raw": "{{baseUrl}}/api/migrations/{{migrationId}}/sample?object=users&limit=2",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "migrations", "{{migrationId}}", "sample"],
+                  "query": [
+                    { "key": "object", "value": "users" },
+                    { "key": "limit",  "value": "2" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Sample Data - Companies",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
+                "url": {
+                  "raw": "{{baseUrl}}/api/migrations/{{migrationId}}/sample?object=companies&limit=2",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "migrations", "{{migrationId}}", "sample"],
+                  "query": [
+                    { "key": "object", "value": "companies" },
+                    { "key": "limit",  "value": "2" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Sample Data - Changes",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
+                "url": {
+                  "raw": "{{baseUrl}}/api/migrations/{{migrationId}}/sample?object=changes&limit=2",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "migrations", "{{migrationId}}", "sample"],
+                  "query": [
+                    { "key": "object", "value": "changes" },
+                    { "key": "limit",  "value": "2" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Sample Data - Problems",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
+                "url": {
+                  "raw": "{{baseUrl}}/api/migrations/{{migrationId}}/sample?object=problems&limit=2",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "migrations", "{{migrationId}}", "sample"],
+                  "query": [
+                    { "key": "object", "value": "problems" },
+                    { "key": "limit",  "value": "2" }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Sample Data - KB Articles",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
+                "url": {
+                  "raw": "{{baseUrl}}/api/migrations/{{migrationId}}/sample?object=kb_articles&limit=2",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "migrations", "{{migrationId}}", "sample"],
+                  "query": [
+                    { "key": "object", "value": "kb_articles" },
+                    { "key": "limit",  "value": "2" }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "03.5 - Post Migration",
+          "item": [
+            {
+              "name": "Postflight Check",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
+                "url": {
+                  "raw": "{{baseUrl}}/api/migrations/{{migrationId}}/postflight",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "migrations", "{{migrationId}}", "postflight"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "03.6 - Rollback",
+          "item": [
+            {
+              "name": "Rollback Migration",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "x-api-key", "value": "{{apiKey}}" }],
+                "url": {
+                  "raw": "{{baseUrl}}/api/migrations/{{migrationId}}/rollback",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "migrations", "{{migrationId}}", "rollback"]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

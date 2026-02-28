@@ -12,7 +12,8 @@ class MongoService {
       return this.connection;
     }
 
-    const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017/saas-migration';
+    const mongoUri =
+      process.env.MONGO_URI || 'mongodb://localhost:27017/saas-migration';
 
     this.connection = await mongoose.connect(mongoUri, {
       minPoolSize: 10,

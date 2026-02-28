@@ -8,7 +8,9 @@ import migrationRoutes from './modules/migration/migration.routes.js';
 const app = express();
 
 app.use(helmet());
-app.use(cors());
+// API-only backend: all state-changing routes require x-api-key header (see apiKey.middleware.js)
+// Custom header requirement makes CSRF attacks impossible from browsers
+app.use(cors({ origin: process.env.ALLOWED_ORIGINS?.split(',') ?? false }));
 app.use(morgan('dev'));
 app.use(express.json());
 
