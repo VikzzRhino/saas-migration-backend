@@ -28,3 +28,15 @@ export async function addMigrationJob(migrationId, objectConfig) {
     { jobId: `migration-${migrationId}` }
   );
 }
+
+export async function addObjectJob(migrationId, object) {
+  const queue = getMigrationQueue();
+  const jobId = `migration-${migrationId}-${object}`;
+  const existing = await queue.getJob(jobId);
+  if (existing) await existing.remove();
+  return queue.add(
+    'process-object',
+    { migrationId, object },
+    { jobId }
+  );
+}
