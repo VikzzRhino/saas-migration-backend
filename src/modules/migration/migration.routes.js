@@ -1,5 +1,4 @@
 import { Router } from 'express';
-// import { getMigrationLogs } from '../logs/logs.controller.js';
 import {
   createMigration,
   getMigrations,
@@ -111,9 +110,6 @@ router.put('/:id/group-mapping', apiKeyMiddleware, updateGroupMapping);
 router.get('/:id/staging/stats', apiKeyMiddleware, getStagingStats);
 router.get('/:id/staging/records', apiKeyMiddleware, getStagedRecords);
 router.put('/:id/retention-policy', apiKeyMiddleware, updateRetentionPolicy);
-
-// Logs route disabled temporarily.
-// router.get('/:id/logs', apiKeyMiddleware, getMigrationLogs);
 
 // Migration lifecycle
 router.get('/:id/preflight', apiKeyMiddleware, preflightEstimate);
