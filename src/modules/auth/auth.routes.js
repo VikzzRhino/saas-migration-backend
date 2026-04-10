@@ -10,6 +10,7 @@ import {
   resetPassword,
   updateProfile,
   changePassword,
+  getApiKey,
 } from './auth.controller.js';
 import { protect } from './auth.middleware.js';
 
@@ -24,5 +25,6 @@ router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPassword);
 router.put('/profile', protect, updateProfile);
 router.put('/password', protect, changePassword);
+router.get('/api-key', protect, getApiKey);
 
 export default router;

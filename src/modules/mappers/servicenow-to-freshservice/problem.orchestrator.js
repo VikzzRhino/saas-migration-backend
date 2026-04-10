@@ -66,6 +66,62 @@ function accumulateSummary(statsKey, stats, summary) {
   }
 }
 
+const VALID_PROBLEM_FIELDS = new Set([
+  'subject',
+  'description',
+  'priority',
+  'status',
+  'impact',
+  'due_by',
+  'known_error',
+  'category',
+  'sub_category',
+  'item_category',
+  'agent_id',
+  'group_id',
+  'requester_id',
+  'email',
+  'analysis_fields',
+  'custom_fields',
+  'created_at',
+  'updated_at',
+  'tags',
+  'assets',
+  'department_id',
+]);
+
+function sanitizePayload(payload) {
+  for (const key of Object.keys(payload)) {
+    if (!VALID_PROBLEM_FIELDS.has(key)) {
+      delete payload[key];
+    }
+  }
+
+  if (!payload.description || !payload.description.trim()) {
+    payload.description = payload.subject || '-';
+  }
+
+  const now = new Date();
+  if (payload.created_at && new Date(payload.created_at) > now) {
+    delete payload.created_at;
+  }
+  if (payload.updated_at && new Date(payload.updated_at) > now) {
+    delete payload.updated_at;
+  }
+
+  if (payload.created_at && payload.updated_at) {
+    if (new Date(payload.updated_at) < new Date(payload.created_at)) {
+      payload.updated_at = payload.created_at;
+    }
+  }
+
+  if (payload.sub_category && !payload.category) {
+    delete payload.sub_category;
+  }
+
+  return payload;
+}
+
 const REQUIRED_CUSTOM_FIELDS = ['snow_number', 'resolution_code', 'workaround'];
 
 /**
@@ -210,6 +266,8 @@ export async function migrateProblems(context) {
 
     if (!valid) delete payload.custom_fields;
 
+    sanitizePayload(payload);
+
     // Requester fallback — Freshservice requires requester_id or email
     if (payload.requester_id === undefined) {
       const obEmail = snow['opened_by.email'];
@@ -255,7 +313,8 @@ export async function migrateProblems(context) {
       );
       stats.problems.migrated++;
     } catch (err) {
-      const errors = err.response?.data?.errors ?? [];
+      const fsError = err?.response?.data;
+      const errors = fsError?.errors ?? [];
       const badFields = errors.map((e) => e.field);
       const retryable = badFields.some((f) =>
         ['requester_id', 'category', 'sub_category'].includes(f)
@@ -263,8 +322,13 @@ export async function migrateProblems(context) {
 
       if (retryable) {
         if (badFields.includes('requester_id')) delete payload.requester_id;
-        if (badFields.includes('category')) delete payload.category;
-        if (badFields.includes('sub_category')) delete payload.sub_category;
+        if (
+          badFields.includes('category') ||
+          badFields.includes('sub_category')
+        ) {
+          delete payload.category;
+          delete payload.sub_category;
+        }
         try {
           const retryRes = await throttledPost(
             fsClient,
@@ -282,24 +346,21 @@ export async function migrateProblems(context) {
           );
           stats.problems.migrated++;
         } catch (retryErr) {
-          console.error(
-            '[problems] FULL ERROR (retry):',
-            JSON.stringify(retryErr.response?.data, null, 2)
-          );
+          const retryFsError = retryErr?.response?.data;
           logger.error(
-            `[problems] Failed to create problem SN ${snowNumber} (retry): ${retryErr.message}`
+            `[problems] Failed to create problem SN ${snowNumber} (retry): ${
+              retryErr.message
+            } | FS response: ${JSON.stringify(retryFsError)}`
           );
           stats.problems.failed++;
           if (typeof onProgress === 'function') onProgress(i + 1, total);
           continue;
         }
       } else {
-        console.error(
-          '[problems] FULL ERROR:',
-          JSON.stringify(err.response?.data, null, 2)
-        );
         logger.error(
-          `[problems] Failed to create problem SN ${snowNumber}: ${err.message}`
+          `[problems] Failed to create problem SN ${snowNumber}: ${
+            err.message
+          } | FS response: ${JSON.stringify(fsError)}`
         );
         stats.problems.failed++;
         if (typeof onProgress === 'function') onProgress(i + 1, total);

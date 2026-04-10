@@ -83,12 +83,6 @@ export function mapIncident(snow, context = {}) {
   const dueDate = toISO(snow.due_date);
   if (dueDate) mapped.due_by = dueDate;
 
-  const resolvedAt = toISO(snow.resolved_at);
-  if (resolvedAt) mapped.resolved_at = resolvedAt;
-
-  const closedAt = toISO(snow.closed_at);
-  if (closedAt) mapped.closed_at = closedAt;
-
   // responder_id — resolve assigned_to via agentEmailToId
   const assignedToKey = displayVal(snow.assigned_to);
   if (assignedToKey) {

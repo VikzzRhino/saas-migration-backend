@@ -33,6 +33,7 @@ const SNOW_FIELDS = [
   'requested_by',
   'requested_by.email',
   'opened_by',
+  'opened_by.email',
   'opened_at',
   'sys_updated_on',
   'closed_at',
@@ -55,6 +56,33 @@ function val(field) {
     : field;
 }
 
+const EMAIL_LIKE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function normalizeEmailString(raw) {
+  if (raw == null || typeof raw !== 'string') return null;
+  const s = raw.trim();
+  if (!s) return null;
+  const angle = s.match(/<([^>]+@[^>]+)>/);
+  const candidate = (angle ? angle[1] : s).trim();
+  return EMAIL_LIKE.test(candidate) ? candidate : null;
+}
+
+function extractEmail(field) {
+  if (!field) return null;
+  const str =
+    typeof field === 'object' ? field.display_value ?? field.value : field;
+  return normalizeEmailString(String(str ?? ''));
+}
+
+function findRequesterEmail(snow) {
+  return (
+    extractEmail(snow['requested_by.email']) ||
+    extractEmail(snow['opened_by.email']) ||
+    extractEmail(snow.requested_by) ||
+    extractEmail(snow.opened_by)
+  );
+}
+
 function initStats() {
   return {
     changes: { total: 0, migrated: 0, failed: 0 },
@@ -72,6 +100,104 @@ function accumulateSummary(statsKey, stats, summary) {
   if ('skipped' in stats[statsKey]) {
     stats[statsKey].skipped += summary.skipped ?? 0;
   }
+}
+
+const VALID_CHANGE_FIELDS = new Set([
+  'agent_id',
+  'description',
+  'requester_id',
+  'email',
+  'group_id',
+  'priority',
+  'impact',
+  'status',
+  'risk',
+  'change_type',
+  'approval_status',
+  'planned_start_date',
+  'planned_end_date',
+  'subject',
+  'department_id',
+  'category',
+  'sub_category',
+  'item_category',
+  'custom_fields',
+  'maintenance_window',
+  'assets',
+  'impacted_services',
+  'attachments',
+  'created_at',
+  'updated_at',
+  'tags',
+]);
+
+function sanitizePayload(payload) {
+  for (const key of Object.keys(payload)) {
+    if (!VALID_CHANGE_FIELDS.has(key)) {
+      delete payload[key];
+    }
+  }
+
+  if (
+    !payload.description ||
+    !payload.description.trim() ||
+    payload.description === '<p> </p>'
+  ) {
+    payload.description = payload.subject || '<p>No description provided</p>';
+  }
+
+  const fallbackStart = new Date(Date.now() + 86400000).toISOString();
+  const fallbackEnd = new Date(Date.now() + 172800000).toISOString();
+  if (!payload.planned_start_date) payload.planned_start_date = fallbackStart;
+  if (!payload.planned_end_date) payload.planned_end_date = fallbackEnd;
+
+  if (
+    new Date(payload.planned_end_date) <= new Date(payload.planned_start_date)
+  ) {
+    payload.planned_end_date = new Date(
+      new Date(payload.planned_start_date).getTime() + 86400000
+    ).toISOString();
+  }
+
+  const now = new Date();
+  if (payload.created_at && new Date(payload.created_at) > now) {
+    delete payload.created_at;
+  }
+  if (payload.updated_at && new Date(payload.updated_at) > now) {
+    delete payload.updated_at;
+  }
+
+  if (payload.created_at && payload.updated_at) {
+    if (new Date(payload.updated_at) < new Date(payload.created_at)) {
+      payload.updated_at = payload.created_at;
+    }
+  }
+
+  if (payload.sub_category && !payload.category) {
+    delete payload.sub_category;
+  }
+
+  if (payload.requester_id !== undefined) {
+    const rid = payload.requester_id;
+    const isValidNumber = typeof rid === 'number' && rid > 0;
+    const normalized =
+      typeof rid === 'string' ? normalizeEmailString(rid) : null;
+    if (isValidNumber) {
+      /* keep numeric FS requester id */
+    } else if (normalized) {
+      payload.requester_id = normalized;
+    } else {
+      delete payload.requester_id;
+    }
+  }
+
+  if (payload.email !== undefined) {
+    const norm = normalizeEmailString(String(payload.email));
+    if (norm) payload.email = norm;
+    else delete payload.email;
+  }
+
+  return payload;
 }
 
 const REQUIRED_CUSTOM_FIELDS = [
@@ -145,7 +271,12 @@ export async function migrateChanges(context) {
   const stats = initStats();
 
   // Preflight — validate custom fields exist in Freshservice
-  await validateChangeCustomFields(fsClient, logger);
+  const { valid } = await validateChangeCustomFields(fsClient, logger);
+  if (!valid) {
+    logger.warn(
+      '[changes] Some custom fields missing — data will be silently dropped'
+    );
+  }
 
   // Step 2 — Paginated fetch
   const allChanges = [];
@@ -195,27 +326,35 @@ export async function migrateChanges(context) {
     // Apply dynamic field mappings from migration config
     if (context.fieldMappings?.length > 0) {
       const dynamicMapped = applyMappings(snow, context.fieldMappings);
+      if (dynamicMapped.custom_fields) {
+        payload.custom_fields = {
+          ...payload.custom_fields,
+          ...dynamicMapped.custom_fields,
+        };
+        delete dynamicMapped.custom_fields;
+      }
       Object.assign(payload, dynamicMapped);
     }
 
     // Apply value mappings (enum translation)
-    if (context.valueMappings && Object.keys(context.valueMappings).length > 0) {
+    if (
+      context.valueMappings &&
+      Object.keys(context.valueMappings).length > 0
+    ) {
       applyValueMappings(snow, payload, 'changes', context.valueMappings, {
         agentMatching: { entries: [] },
         groupMapping: [],
       });
     }
 
-    // Requester fallback — use email from requested_by.email if requester_id not resolved
-    if (payload.requester_id === undefined) {
-      const reqEmail = snow['requested_by.email'];
-      const emailStr =
-        typeof reqEmail === 'object'
-          ? reqEmail?.display_value ?? reqEmail?.value
-          : reqEmail;
-      if (emailStr && emailStr.includes('@')) {
-        payload.email = emailStr;
-      }
+    if (!valid) delete payload.custom_fields;
+
+    sanitizePayload(payload);
+
+    // Requester fallback — ensure requester_id or email is present after sanitization
+    if (!payload.requester_id && !payload.email) {
+      const fallbackEmail = findRequesterEmail(snow);
+      if (fallbackEmail) payload.email = fallbackEmail;
     }
 
     // b) Create in Freshservice
@@ -242,9 +381,19 @@ export async function migrateChanges(context) {
       );
 
       if (retryable) {
-        if (badFields.includes('requester_id')) delete payload.requester_id;
-        if (badFields.includes('category')) delete payload.category;
-        if (badFields.includes('sub_category')) delete payload.sub_category;
+        if (badFields.includes('requester_id')) {
+          delete payload.requester_id;
+          delete payload.email;
+          const fallbackEmail = findRequesterEmail(snow);
+          if (fallbackEmail) payload.email = fallbackEmail;
+        }
+        if (
+          badFields.includes('category') ||
+          badFields.includes('sub_category')
+        ) {
+          delete payload.category;
+          delete payload.sub_category;
+        }
         try {
           const retryRes = await throttledPost(
             fsClient,
@@ -255,21 +404,67 @@ export async function migrateChanges(context) {
           freshChangeId = retryRes?.change?.id ?? retryRes?.id;
           if (!freshChangeId) throw new Error('No change ID returned on retry');
           logger.info(
-            `[changes] Created FS change id=${freshChangeId} ← SN ${snowNumber} (dropped ${badFields.join(', ')})`
+            `[changes] Created FS change id=${freshChangeId} ← SN ${snowNumber} (dropped ${badFields.join(
+              ', '
+            )})`
           );
           stats.changes.migrated++;
         } catch (retryErr) {
           const retryFsError = retryErr?.response?.data;
-          logger.error(
-            `[changes] Failed to create change SN ${snowNumber} (retry): ${retryErr.message} | FS response: ${JSON.stringify(retryFsError)}`
-          );
-          stats.changes.failed++;
-          if (typeof onProgress === 'function') onProgress(i + 1, total);
-          continue;
+          const retryErrors = retryFsError?.errors ?? [];
+          const retryBad = retryErrors.map((e) => e.field);
+          const onlyRequester =
+            retryBad.length > 0 && retryBad.every((f) => f === 'requester_id');
+          if (onlyRequester) {
+            delete payload.requester_id;
+            delete payload.email;
+            try {
+              const lastRes = await throttledPost(
+                fsClient,
+                '/api/v2/changes',
+                payload,
+                { tag: 'changes' }
+              );
+              freshChangeId = lastRes?.change?.id ?? lastRes?.id;
+              if (!freshChangeId) {
+                throw new Error('No change ID returned on last-chance retry');
+              }
+              logger.info(
+                `[changes] Created FS change id=${freshChangeId} ← SN ${snowNumber} (no requester — FS default)`
+              );
+              stats.changes.migrated++;
+            } catch (lastErr) {
+              const lastFs = lastErr?.response?.data;
+              logger.error(
+                `[changes] Failed to create change SN ${snowNumber} (retry): ${
+                  retryErr.message
+                } | FS response: ${JSON.stringify(retryFsError)}`
+              );
+              logger.error(
+                `[changes] Last-chance retry (no requester) also failed: ${
+                  lastErr.message
+                } | FS response: ${JSON.stringify(lastFs)}`
+              );
+              stats.changes.failed++;
+              if (typeof onProgress === 'function') onProgress(i + 1, total);
+              continue;
+            }
+          } else {
+            logger.error(
+              `[changes] Failed to create change SN ${snowNumber} (retry): ${
+                retryErr.message
+              } | FS response: ${JSON.stringify(retryFsError)}`
+            );
+            stats.changes.failed++;
+            if (typeof onProgress === 'function') onProgress(i + 1, total);
+            continue;
+          }
         }
       } else {
         logger.error(
-          `[changes] Failed to create change SN ${snowNumber}: ${err.message} | FS response: ${JSON.stringify(fsError)}`
+          `[changes] Failed to create change SN ${snowNumber}: ${
+            err.message
+          } | FS response: ${JSON.stringify(fsError)}`
         );
         stats.changes.failed++;
         if (typeof onProgress === 'function') onProgress(i + 1, total);

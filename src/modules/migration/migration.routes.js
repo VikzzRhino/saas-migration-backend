@@ -40,6 +40,7 @@ import {
   getStagingStats,
   getStagedRecords,
   updateRetentionPolicy,
+  getMigrationReadiness,
 } from './migration.controller.js';
 import apiKeyMiddleware from '../../middleware/apiKey.middleware.js';
 
@@ -116,6 +117,7 @@ router.get('/:id/logs', apiKeyMiddleware, getMigrationLogs);
 
 // Migration lifecycle
 router.get('/:id/preflight', apiKeyMiddleware, preflightEstimate);
+router.get('/:id/readiness', apiKeyMiddleware, getMigrationReadiness);
 router.post('/:id/start', apiKeyMiddleware, startMigration);
 router.post('/:id/run-object', apiKeyMiddleware, runObject);
 router.post('/:id/pause', apiKeyMiddleware, pauseMigration);

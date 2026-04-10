@@ -66,6 +66,78 @@ function accumulateSummary(statsKey, stats, summary) {
   }
 }
 
+const VALID_TICKET_FIELDS = new Set([
+  'subject',
+  'description',
+  'priority',
+  'status',
+  'source',
+  'impact',
+  'urgency',
+  'category',
+  'sub_category',
+  'requester_id',
+  'email',
+  'responder_id',
+  'group_id',
+  'department_id',
+  'due_by',
+  'fr_due_by',
+  'created_at',
+  'updated_at',
+  'custom_fields',
+  'type',
+  'tags',
+  'assets',
+  'workspace_id',
+  'cc_emails',
+  'name',
+  'phone',
+  'email_config_id',
+  'item_category',
+]);
+
+const VALID_SOURCE_VALUES = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+
+function sanitizePayload(payload) {
+  for (const key of Object.keys(payload)) {
+    if (!VALID_TICKET_FIELDS.has(key)) {
+      delete payload[key];
+    }
+  }
+
+  if (!payload.description || !payload.description.trim()) {
+    payload.description = payload.subject || '-';
+  }
+
+  if (
+    payload.source !== undefined &&
+    !VALID_SOURCE_VALUES.has(Number(payload.source))
+  ) {
+    delete payload.source;
+  }
+
+  const now = new Date();
+  if (payload.created_at && new Date(payload.created_at) > now) {
+    delete payload.created_at;
+  }
+  if (payload.updated_at && new Date(payload.updated_at) > now) {
+    delete payload.updated_at;
+  }
+
+  if (payload.created_at && payload.updated_at) {
+    if (new Date(payload.updated_at) < new Date(payload.created_at)) {
+      payload.updated_at = payload.created_at;
+    }
+  }
+
+  if (payload.sub_category && !payload.category) {
+    delete payload.sub_category;
+  }
+
+  return payload;
+}
+
 const REQUIRED_CUSTOM_FIELDS = [
   'snow_number',
   'close_notes',
@@ -280,6 +352,8 @@ export async function migrateIncidents(context) {
 
     if (!valid) delete payload.custom_fields;
 
+    sanitizePayload(payload);
+
     // c) POST to Freshservice — flat payload, not wrapped
     let freshTicketId;
     try {
@@ -305,15 +379,22 @@ export async function migrateIncidents(context) {
       );
       stats.incidents.migrated++;
     } catch (err) {
-      const errors = err.response?.data?.errors ?? [];
-      const hasCategoryError = errors.some(
-        (e) => e.field === 'category' || e.field === 'sub_category'
+      const fsError = err?.response?.data;
+      const errors = fsError?.errors ?? [];
+      const badFields = errors.map((e) => e.field);
+      const retryable = badFields.some((f) =>
+        ['requester_id', 'category', 'sub_category'].includes(f)
       );
 
-      if (hasCategoryError && (payload.category || payload.sub_category)) {
-        const droppedCat = payload.category;
-        delete payload.category;
-        delete payload.sub_category;
+      if (retryable) {
+        if (badFields.includes('requester_id')) delete payload.requester_id;
+        if (
+          badFields.includes('category') ||
+          badFields.includes('sub_category')
+        ) {
+          delete payload.category;
+          delete payload.sub_category;
+        }
         try {
           const retryRes = await throttledPost(
             fsClient,
@@ -324,28 +405,27 @@ export async function migrateIncidents(context) {
           freshTicketId = retryRes?.ticket?.id ?? retryRes?.id;
           if (!freshTicketId) throw new Error('No ticket ID returned on retry');
           logger.info(
-            `[incidents] Created FS ticket id=${freshTicketId} ← SN ${snowNumber} (dropped invalid category "${droppedCat}")`
+            `[incidents] Created FS ticket id=${freshTicketId} ← SN ${snowNumber} (dropped ${badFields.join(
+              ', '
+            )})`
           );
           stats.incidents.migrated++;
         } catch (retryErr) {
-          console.error(
-            '[incidents] FULL ERROR (retry):',
-            JSON.stringify(retryErr.response?.data, null, 2)
-          );
+          const retryFsError = retryErr?.response?.data;
           logger.error(
-            `[incidents] Failed to create ticket SN ${snowNumber} (retry): ${retryErr.message}`
+            `[incidents] Failed to create ticket SN ${snowNumber} (retry): ${
+              retryErr.message
+            } | FS response: ${JSON.stringify(retryFsError)}`
           );
           stats.incidents.failed++;
           if (typeof onProgress === 'function') onProgress(i + 1, total);
           continue;
         }
       } else {
-        console.error(
-          '[incidents] FULL ERROR:',
-          JSON.stringify(err.response?.data, null, 2)
-        );
         logger.error(
-          `[incidents] Failed to create ticket SN ${snowNumber}: ${err.message}`
+          `[incidents] Failed to create ticket SN ${snowNumber}: ${
+            err.message
+          } | FS response: ${JSON.stringify(fsError)}`
         );
         stats.incidents.failed++;
         if (typeof onProgress === 'function') onProgress(i + 1, total);

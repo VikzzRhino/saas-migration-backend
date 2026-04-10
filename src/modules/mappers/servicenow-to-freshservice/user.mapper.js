@@ -1,6 +1,6 @@
 // src/modules/mappers/servicenow-to-freshservice/user.mapper.js
 
-const TIMEZONE_MAP = {
+export const TIMEZONE_MAP = {
   'Pacific/Midway': 'Midway Island',
   'Pacific/Pago_Pago': 'American Samoa',
   'Pacific/Honolulu': 'Hawaii',
@@ -40,7 +40,7 @@ const TIMEZONE_MAP = {
   'Europe/London': 'London',
   'Africa/Monrovia': 'Monrovia',
   'Etc/UTC': 'UTC',
-  'UTC': 'UTC',
+  UTC: 'UTC',
   'Europe/Amsterdam': 'Amsterdam',
   'Europe/Belgrade': 'Belgrade',
   'Europe/Berlin': 'Berlin',
@@ -142,7 +142,7 @@ const TIMEZONE_MAP = {
   'America/Anchorage': 'Alaska',
   'America/Toronto': 'Eastern Time (US & Canada)',
   'America/Vancouver': 'Pacific Time (US & Canada)',
-  'GMT': 'UTC',
+  GMT: 'UTC',
 };
 
 function mapTimezone(snTz) {
@@ -183,7 +183,7 @@ export function mapRequester(snow, deptIdMap) {
 
   const mapped = {
     first_name: val(snow.first_name) || 'Unknown',
-    last_name:  val(snow.last_name)  || 'User',
+    last_name: val(snow.last_name) || 'User',
     primary_email: email,
   };
 
@@ -196,7 +196,8 @@ export function mapRequester(snow, deptIdMap) {
   const lang = val(snow.language)?.toLowerCase()?.slice(0, 2);
   if (lang && VALID_LANGUAGES.includes(lang)) mapped.language = lang;
 
-  mapped.vip_user = snow.vip === 'true' || snow.vip === true;
+  const vipRaw = val(snow.vip);
+  mapped.vip_user = vipRaw === 'true' || vipRaw === true || vipRaw === '1';
 
   const workPhone = sanitizePhone(val(snow.phone));
   if (workPhone) mapped.work_phone_number = workPhone;
@@ -210,12 +211,13 @@ export function mapRequester(snow, deptIdMap) {
   return mapped;
 }
 
-export function mapAgent(snow) {
+export function mapAgent(snow, fsRoles = []) {
+  const roleId = fsRoles.length > 0 ? fsRoles[0].id : 1;
   const mapped = {
     first_name: val(snow.first_name) || 'Unknown',
     last_name: val(snow.last_name) || 'User',
     email: val(snow.email) || null,
-    roles: [{ role_id: 1, assignment_scope: 'entire_helpdesk' }],
+    roles: [{ role_id: roleId, assignment_scope: 'entire_helpdesk' }],
   };
 
   const phone = val(snow.phone);

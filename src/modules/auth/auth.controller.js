@@ -80,6 +80,10 @@ export async function session(req, res) {
   res.json({ user: req.user });
 }
 
+export async function getApiKey(req, res) {
+  res.json({ apiKey: req.tenant?.apiKey ?? null });
+}
+
 export async function forgotPassword(req, res) {
   const parsed = forgotSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });

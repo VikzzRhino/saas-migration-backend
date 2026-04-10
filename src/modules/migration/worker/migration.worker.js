@@ -138,7 +138,13 @@ async function updateStats(migrationId, object, success, failed) {
   });
 }
 
-async function logError(migrationId, object, snowId, error, logger = fallbackLogger) {
+async function logError(
+  migrationId,
+  object,
+  snowId,
+  error,
+  logger = fallbackLogger
+) {
   const id =
     typeof snowId === 'object'
       ? snowId?.value ?? snowId?.display_value ?? String(snowId)
@@ -146,7 +152,9 @@ async function logError(migrationId, object, snowId, error, logger = fallbackLog
   const msg =
     typeof error === 'string' ? error : error.message ?? JSON.stringify(error);
   const details = error.details ? ` | ${JSON.stringify(error.details)}` : '';
-  logger.error(`[${migrationId}] ${object} FAILED record ${id}: ${msg}${details}`);
+  logger.error(
+    `[${migrationId}] ${object} FAILED record ${id}: ${msg}${details}`
+  );
   await Migration.findByIdAndUpdate(migrationId, {
     $push: {
       errorLog: {
@@ -160,7 +168,13 @@ async function logError(migrationId, object, snowId, error, logger = fallbackLog
   });
 }
 
-async function logSkip(migrationId, object, snowId, reason, logger = fallbackLogger) {
+async function logSkip(
+  migrationId,
+  object,
+  snowId,
+  reason,
+  logger = fallbackLogger
+) {
   logger.warn(`[${migrationId}] ${object} SKIPPED ${snowId}: ${reason}`);
   await Migration.findByIdAndUpdate(migrationId, {
     $inc: { [`stats.${object}.skipped`]: 1, [`stats.${object}.total`]: 1 },
@@ -214,13 +228,21 @@ async function processPages(
   let offset = startOffset;
 
   while (true) {
-    const records = await retryWithBackoff(() => fetchFn(PAGE_SIZE, offset), 3, logger);
+    const records = await retryWithBackoff(
+      () => fetchFn(PAGE_SIZE, offset),
+      3,
+      logger
+    );
     if (!records || records.length === 0) {
-      logger.info(`[${migrationId}] ${objectName}: no more records at offset ${offset}`);
+      logger.info(
+        `[${migrationId}] ${objectName}: no more records at offset ${offset}`
+      );
       break;
     }
 
-    logger.info(`[${migrationId}] ${objectName}: processing ${records.length} records (offset ${offset})`);
+    logger.info(
+      `[${migrationId}] ${objectName}: processing ${records.length} records (offset ${offset})`
+    );
 
     // Stage fetched records to MongoDB for data retention
     await staging.stageRecords(migrationId, objectName, records, retentionDays);
@@ -231,7 +253,11 @@ async function processPages(
     for (const record of records) {
       const sourceId = extractSysId(record);
       try {
-        const result = await retryWithBackoff(() => processFn(record), 3, logger);
+        const result = await retryWithBackoff(
+          () => processFn(record),
+          3,
+          logger
+        );
         if (result === 'skipped') {
           if (sourceId)
             await staging.markSkipped(
@@ -267,13 +293,21 @@ async function processPages(
           const errDetail = err.response?.data ?? err.message;
           if (err.response?.status === 400 && err.response?.data?.errors) {
             logger.error(
-              `[${migrationId}] VALIDATION DETAILS for ${objectName} ${sourceId}: ${JSON.stringify(err.response.data.errors)}`
+              `[${migrationId}] VALIDATION DETAILS for ${objectName} ${sourceId}: ${JSON.stringify(
+                err.response.data.errors
+              )}`
             );
           }
-          await logError(migrationId, objectName, sourceId, {
-            message: err.message,
-            details: errDetail,
-          }, logger);
+          await logError(
+            migrationId,
+            objectName,
+            sourceId,
+            {
+              message: err.message,
+              details: errDetail,
+            },
+            logger
+          );
           if (sourceId)
             await staging.markFailed(
               migrationId,
@@ -285,7 +319,9 @@ async function processPages(
       }
     }
 
-    logger.info(`[${migrationId}] ${objectName}: page done — success=${success} failed=${failed}`);
+    logger.info(
+      `[${migrationId}] ${objectName}: page done — success=${success} failed=${failed}`
+    );
     await updateStats(migrationId, objectName, success, failed);
     offset += records.length;
     await saveCheckpoint(
@@ -311,106 +347,187 @@ function computeObjectStatus(stats) {
 
 // ── Build per-object stage runner ────────────────────────────────────────────
 function buildObjectStage(object, migration, source, target, mappers, deps) {
-  const { migrationId, fm, valueMappings, agentMatching, groupMapping, retentionDays, logger } = deps;
+  const {
+    migrationId,
+    fm,
+    valueMappings,
+    agentMatching,
+    groupMapping,
+    retentionDays,
+    logger,
+  } = deps;
   const { deptIdMap, requesterIdMap } = deps;
 
   function mapRecord(objectType, record, fallbackFn) {
     const objectMappings = fm[objectType];
-    let mapped = objectMappings?.length > 0
-      ? applyMappings(record, objectMappings)
-      : fallbackFn(record);
+    let mapped;
+    if (objectMappings?.length > 0) {
+      const ctx = { roles: migration.workspace?.roles ?? [] };
+      mapped = applyMappings(record, objectMappings, ctx);
+    } else {
+      mapped = fallbackFn(record);
+    }
     const objValueMappings = valueMappings[objectType];
-    if (objValueMappings || groupMapping.length > 0 || agentMatching.entries?.length > 0) {
-      mapped = applyValueMappings(record, mapped, objectType, objValueMappings, { agentMatching, groupMapping });
+    if (
+      objValueMappings ||
+      groupMapping.length > 0 ||
+      agentMatching.entries?.length > 0
+    ) {
+      mapped = applyValueMappings(
+        record,
+        mapped,
+        objectType,
+        objValueMappings,
+        { agentMatching, groupMapping }
+      );
     }
     return mapped;
   }
 
   const agentEmailToId = new Map(
-    (agentMatching.entries ?? []).filter((e) => e.fsAgentId).map((e) => [e.snName, e.fsAgentId])
+    (agentMatching.entries ?? [])
+      .filter((e) => e.fsAgentId)
+      .map((e) => [e.snName, e.fsAgentId])
   );
   const groupNameToId = new Map(
-    (groupMapping ?? []).filter((g) => g.fsGroupId).map((g) => [g.snGroupName, g.fsGroupId])
+    (groupMapping ?? [])
+      .filter((g) => g.fsGroupId)
+      .map((g) => [g.snGroupName, g.fsGroupId])
   );
   const requesterEmailToId = new Map([
     ...Array.from(requesterIdMap.entries()),
-    ...(agentMatching.entries ?? []).filter((e) => e.fsAgentId).map((e) => [e.snName, e.fsAgentId]),
+    ...(agentMatching.entries ?? [])
+      .filter((e) => e.fsAgentId)
+      .map((e) => [e.snName, e.fsAgentId]),
   ]);
 
   const stages = {
     companies: async () => {
       await processPages(
-        migrationId, 'companies',
+        migrationId,
+        'companies',
         (limit, offset) => source.fetchCompanies(limit, offset),
         async (record) => {
-          const mapped = mapRecord('companies', record, (r) => mappers.company.mapDepartment(r));
+          const mapped = mapRecord('companies', record, (r) =>
+            mappers.company.mapDepartment(r)
+          );
           if (!mapped.name) {
-            const rawName = typeof record.name === 'object' ? record.name?.value ?? record.name?.display_value : record.name;
+            const rawName =
+              typeof record.name === 'object'
+                ? record.name?.value ?? record.name?.display_value
+                : record.name;
             mapped.name = rawName || null;
           }
-          if (!mapped.name) { return 'skipped'; }
+          if (!mapped.name) {
+            return 'skipped';
+          }
           const res = await target.createDepartment(mapped);
           const sysId = extractSysId(record);
           if (sysId) deptIdMap.set(sysId, res.department?.id);
           return res.department?.id;
         },
-        0, retentionDays, logger
+        0,
+        retentionDays,
+        logger
       );
     },
     users: async () => {
       await processPages(
-        migrationId, 'users',
+        migrationId,
+        'users',
         (limit, offset) => source.fetchUsers(limit, offset),
         async (record) => {
-          const mapped = mapRecord('users', record, (r) => mappers.user.mapRequester(r, deptIdMap));
+          const mapped = mapRecord('users', record, (r) =>
+            mappers.user.mapRequester(r, deptIdMap)
+          );
           if (!mapped || !mapped.primary_email) {
-            await logSkip(migrationId, 'users', extractSysId(record), 'Missing primary_email', logger);
+            await logSkip(
+              migrationId,
+              'users',
+              extractSysId(record),
+              'Missing primary_email',
+              logger
+            );
             return 'skipped';
           }
           const deptRef = record.department;
-          const deptId = deptIdMap?.get(typeof deptRef === 'object' ? deptRef?.value : deptRef);
+          const deptId = deptIdMap?.get(
+            typeof deptRef === 'object' ? deptRef?.value : deptRef
+          );
           if (deptId && !mapped.department_id) mapped.department_id = deptId;
           const res = await target.createRequester(mapped);
-          const fullName = `${val(record.first_name)} ${val(record.last_name)}`.trim();
+          const fullName = `${val(record.first_name)} ${val(
+            record.last_name
+          )}`.trim();
           if (fullName) requesterIdMap.set(fullName, res.requester?.id);
-          if (mapped.primary_email) requesterIdMap.set(mapped.primary_email, res.requester?.id);
+          if (mapped.primary_email)
+            requesterIdMap.set(mapped.primary_email, res.requester?.id);
           return res.requester?.id;
         },
-        0, retentionDays, logger
+        0,
+        retentionDays,
+        logger
       );
     },
     admins: async () => {
       await processPages(
-        migrationId, 'admins',
+        migrationId,
+        'admins',
         (limit, offset) => source.fetchAdminUsers(limit, offset),
         async (record) => {
           try {
-            const mapped = mapRecord('admins', record, (r) => mappers.user.mapAgent(r));
+            const mapped = mapRecord('admins', record, (r) =>
+              mappers.user.mapAgent(r, migration.workspace?.roles ?? [])
+            );
             if (!mapped.email || !mapped.email.includes('@')) {
-              await logSkip(migrationId, 'admins', extractSysId(record), 'Missing or invalid email', logger);
+              await logSkip(
+                migrationId,
+                'admins',
+                extractSysId(record),
+                'Missing or invalid email',
+                logger
+              );
               return 'skipped';
             }
             const res = await target.createAgent(mapped);
             return res.agent?.id;
           } catch (err) {
-            if (err.response?.status === 400 && err.response?.data?.errors?.[0]?.field === 'occasional') {
-              await logSkip(migrationId, 'admins', extractSysId(record), 'Agent license limit reached', logger);
+            if (
+              err.response?.status === 400 &&
+              err.response?.data?.errors?.[0]?.field === 'occasional'
+            ) {
+              await logSkip(
+                migrationId,
+                'admins',
+                extractSysId(record),
+                'Agent license limit reached',
+                logger
+              );
               return 'skipped';
             }
             throw err;
           }
         },
-        0, retentionDays, logger
+        0,
+        retentionDays,
+        logger
       );
     },
     incidents: async () => {
       await saveCheckpoint(migrationId, 'incidents', 0, null);
       const incidentStats = await migrateIncidents({
-        snowClient: source, fsClient: target,
-        agentEmailToId, groupNameToId, requesterEmailToId, deptIdMap,
+        snowClient: source,
+        fsClient: target,
+        agentEmailToId,
+        groupNameToId,
+        requesterEmailToId,
+        deptIdMap,
         snowBaseUrl: migration.source.credentials.instanceUrl,
-        logger, fieldMappings: fm.incidents ?? [], valueMappings: valueMappings.incidents ?? {},
-        onProgress: (current, total) => logger.info(`[${migrationId}] incidents: ${current}/${total}`),
+        logger,
+        fieldMappings: fm.incidents ?? [],
+        valueMappings: valueMappings.incidents ?? {},
+        onProgress: (current, total) =>
+          logger.info(`[${migrationId}] incidents: ${current}/${total}`),
       });
       await persistOrchestratorStats(migrationId, {
         incidents: incidentStats.incidents,
@@ -423,11 +540,17 @@ function buildObjectStage(object, migration, source, target, mappers, deps) {
     changes: async () => {
       await saveCheckpoint(migrationId, 'changes', 0, null);
       const changeStats = await migrateChanges({
-        snowClient: source, fsClient: target,
-        agentEmailToId, groupNameToId, requesterEmailToId,
+        snowClient: source,
+        fsClient: target,
+        agentEmailToId,
+        groupNameToId,
+        requesterEmailToId,
         snowBaseUrl: migration.source.credentials.instanceUrl,
-        logger, fieldMappings: fm.changes ?? [], valueMappings: valueMappings.changes ?? {},
-        onProgress: (current, total) => logger.info(`[${migrationId}] changes: ${current}/${total}`),
+        logger,
+        fieldMappings: fm.changes ?? [],
+        valueMappings: valueMappings.changes ?? {},
+        onProgress: (current, total) =>
+          logger.info(`[${migrationId}] changes: ${current}/${total}`),
       });
       await persistOrchestratorStats(migrationId, {
         changes: changeStats.changes,
@@ -440,11 +563,17 @@ function buildObjectStage(object, migration, source, target, mappers, deps) {
     problems: async () => {
       await saveCheckpoint(migrationId, 'problems', 0, null);
       const problemStats = await migrateProblems({
-        snowClient: source, fsClient: target,
-        agentEmailToId, groupNameToId, requesterEmailToId,
+        snowClient: source,
+        fsClient: target,
+        agentEmailToId,
+        groupNameToId,
+        requesterEmailToId,
         snowBaseUrl: migration.source.credentials.instanceUrl,
-        logger, fieldMappings: fm.problems ?? [], valueMappings: valueMappings.problems ?? {},
-        onProgress: (current, total) => logger.info(`[${migrationId}] problems: ${current}/${total}`),
+        logger,
+        fieldMappings: fm.problems ?? [],
+        valueMappings: valueMappings.problems ?? {},
+        onProgress: (current, total) =>
+          logger.info(`[${migrationId}] problems: ${current}/${total}`),
       });
       await persistOrchestratorStats(migrationId, {
         problems: problemStats.problems,
@@ -458,11 +587,15 @@ function buildObjectStage(object, migration, source, target, mappers, deps) {
       // kb_categories and kb_articles are run together via the kb orchestrator
       await saveCheckpoint(migrationId, 'kb', 0, null);
       const kbStats = await migrateKb({
-        snowClient: source, fsClient: target,
+        snowClient: source,
+        fsClient: target,
         agentEmailToId,
         snowBaseUrl: migration.source.credentials.instanceUrl,
-        logger, fieldMappings: fm.kb_articles ?? [], valueMappings: valueMappings.kb_articles ?? {},
-        onProgress: (current, total) => logger.info(`[${migrationId}] kb: ${current}/${total}`),
+        logger,
+        fieldMappings: fm.kb_articles ?? [],
+        valueMappings: valueMappings.kb_articles ?? {},
+        onProgress: (current, total) =>
+          logger.info(`[${migrationId}] kb: ${current}/${total}`),
       });
       await persistOrchestratorStats(migrationId, {
         kb_categories: kbStats.categories,
@@ -486,13 +619,24 @@ async function processObjectJob(job) {
   const migration = await Migration.findById(migrationId);
   if (!migration) throw new Error(`Migration ${migrationId} not found`);
 
-  const source = createSourceConnector(migration.source.system, migration.source.credentials);
-  const target = createTargetConnector(migration.target.system, migration.target.credentials);
+  const source = createSourceConnector(
+    migration.source.system,
+    migration.source.credentials
+  );
+  const target = createTargetConnector(
+    migration.target.system,
+    migration.target.credentials
+  );
 
   try {
     const { total } = await target.getRateLimitInfo();
-    if (total) { rateLimitState.total = total; rateLimitState.remaining = total; }
-  } catch { /* use fallback */ }
+    if (total) {
+      rateLimitState.total = total;
+      rateLimitState.remaining = total;
+    }
+  } catch {
+    /* use fallback */
+  }
 
   const mappers = getMappers(migration.source.system, migration.target.system);
   const fm = migration.fieldMappings ?? {};
@@ -503,8 +647,25 @@ async function processObjectJob(job) {
   const deptIdMap = new Map();
   const requesterIdMap = new Map();
 
-  const deps = { migrationId, fm, valueMappings, agentMatching, groupMapping, retentionDays, logger, deptIdMap, requesterIdMap };
-  const stageFn = buildObjectStage(object, migration, source, target, mappers, deps);
+  const deps = {
+    migrationId,
+    fm,
+    valueMappings,
+    agentMatching,
+    groupMapping,
+    retentionDays,
+    logger,
+    deptIdMap,
+    requesterIdMap,
+  };
+  const stageFn = buildObjectStage(
+    object,
+    migration,
+    source,
+    target,
+    mappers,
+    deps
+  );
   if (!stageFn) throw new Error(`Unknown object: ${object}`);
 
   await Migration.findByIdAndUpdate(migrationId, {
@@ -518,7 +679,11 @@ async function processObjectJob(job) {
 
   // Determine final object status from stats
   const fresh = await Migration.findById(migrationId, 'stats').lean();
-  const objStats = fresh?.stats?.[object] ?? { total: 0, success: 0, failed: 0 };
+  const objStats = fresh?.stats?.[object] ?? {
+    total: 0,
+    success: 0,
+    failed: 0,
+  };
   const objectStatus = computeObjectStatus(objStats);
 
   await Migration.findByIdAndUpdate(migrationId, {
@@ -539,13 +704,24 @@ async function processMigrationJob(job) {
 
   const emptyStats = Object.fromEntries(
     [
-      'companies', 'users', 'admins', 'incidents', 'changes', 'problems',
-      'notes', 'kb_categories', 'kb_folders', 'kb_articles', 'comments',
-      'attachments', 'tasks',
+      'companies',
+      'users',
+      'admins',
+      'incidents',
+      'changes',
+      'problems',
+      'notes',
+      'kb_categories',
+      'kb_folders',
+      'kb_articles',
+      'comments',
+      'attachments',
+      'tasks',
     ].map((k) => [k, { total: 0, success: 0, failed: 0, skipped: 0 }])
   );
 
-  const isFreshStart = !migration.checkpoint?.currentObject && !migration.startedAt;
+  const isFreshStart =
+    !migration.checkpoint?.currentObject && !migration.startedAt;
 
   const resetFields = isFreshStart
     ? {
@@ -563,7 +739,14 @@ async function processMigrationJob(job) {
       };
 
   await Migration.findByIdAndUpdate(migrationId, resetFields);
-  logger.info(`[${migrationId}] Migration ${ isFreshStart ? 'started' : 'resumed from checkpoint: ' + (migration.checkpoint?.currentObject ?? 'none') }`);
+  logger.info(
+    `[${migrationId}] Migration ${
+      isFreshStart
+        ? 'started'
+        : 'resumed from checkpoint: ' +
+          (migration.checkpoint?.currentObject ?? 'none')
+    }`
+  );
 
   const source = createSourceConnector(
     migration.source.system,
@@ -602,7 +785,8 @@ async function processMigrationJob(job) {
     const objectMappings = fm[objectType];
     let mapped;
     if (objectMappings && objectMappings.length > 0) {
-      mapped = applyMappings(record, objectMappings);
+      const ctx = { roles: migration.workspace?.roles ?? [] };
+      mapped = applyMappings(record, objectMappings, ctx);
     } else {
       mapped = fallbackFn(record);
     }
@@ -686,7 +870,13 @@ async function processMigrationJob(job) {
             );
             if (!mapped || !mapped.primary_email) {
               const sid = extractSysId(record);
-              await logSkip(migrationId, 'users', sid, 'Missing primary_email', logger);
+              await logSkip(
+                migrationId,
+                'users',
+                sid,
+                'Missing primary_email',
+                logger
+              );
               return 'skipped';
             }
             const deptRef = record.department;
@@ -721,7 +911,7 @@ async function processMigrationJob(job) {
             const err400 = (e) => e.response?.status === 400;
             try {
               const mapped = mapRecord('admins', record, (r) =>
-                mappers.user.mapAgent(r)
+                mappers.user.mapAgent(r, migration.workspace?.roles ?? [])
               );
               if (!mapped.email || !mapped.email.includes('@')) {
                 const sid = extractSysId(record);
@@ -769,7 +959,9 @@ async function processMigrationJob(job) {
           'checkpoint'
         ).lean();
         if (fresh?.checkpoint?.currentObject === 'incidents_done') {
-          logger.info(`[${migrationId}] incidents: already completed, skipping`);
+          logger.info(
+            `[${migrationId}] incidents: already completed, skipping`
+          );
           return;
         }
         await saveCheckpoint(migrationId, 'incidents', 0, null);
@@ -998,7 +1190,10 @@ async function processMigrationJob(job) {
 export function startMigrationWorker() {
   const worker = new Worker(
     'migration',
-    (job) => job.name === 'process-object' ? processObjectJob(job) : processMigrationJob(job),
+    (job) =>
+      job.name === 'process-object'
+        ? processObjectJob(job)
+        : processMigrationJob(job),
     {
       connection: redisService.getBullWorkerClient(),
       concurrency: 5,
@@ -1015,7 +1210,9 @@ export function startMigrationWorker() {
         [`objectStatuses.${job.data.object}`]: 'failed',
       });
     } else {
-      await Migration.findByIdAndUpdate(job.data.migrationId, { status: 'failed' });
+      await Migration.findByIdAndUpdate(job.data.migrationId, {
+        status: 'failed',
+      });
     }
   });
 

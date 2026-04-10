@@ -4,6 +4,7 @@ import {
   resolveValueMapping,
   getMergedValueMappings,
 } from './value-mapping-defaults.js';
+import { TIMEZONE_MAP } from '../mappers/servicenow-to-freshservice/user.mapper.js';
 
 // ── Static fallback maps (used when no custom value mappings configured) ─────
 
@@ -54,7 +55,18 @@ const TRANSFORMS = {
   risk_map: (value) => RISK_MAP[Number(val(value))] ?? 2,
   kb_status_map: (value) => KB_STATUS_MAP[val(value)] ?? 1,
   datetime: (value) => toISO(val(value)),
-  admin_roles: () => [{ role_id: 1, assignment_scope: 'entire_helpdesk' }],
+  // Converts IANA timezone string (e.g. "America/New_York") to Freshservice label
+  timezone_map: (value) => TIMEZONE_MAP[val(value)] ?? undefined,
+  // Casts "true"/"false"/1/0 strings to native booleans
+  boolean_cast: (value) => {
+    const v = val(value);
+    return v === 'true' || v === true || v === '1' || v === 1;
+  },
+  // Uses the first available Freshservice role from migration context; falls back to 1
+  admin_roles: (_value, context) => {
+    const roleId = context?.roles?.[0]?.id ?? 1;
+    return [{ role_id: roleId, assignment_scope: 'entire_helpdesk' }];
+  },
   resolve_requester: () => undefined,
   resolve_agent: () => undefined,
   resolve_group: () => undefined,
@@ -63,26 +75,40 @@ const TRANSFORMS = {
 
 /**
  * Apply a single field mapping to extract and transform a value.
+ * @param {object} context - Optional context passed to transforms (e.g. { roles: fsRoles })
  */
-export function applyTransform(sourceRecord, mapping) {
+export function applyTransform(sourceRecord, mapping, context = {}) {
   if (!mapping.sourceField || !mapping.transform) return undefined;
   const rawValue = sourceRecord[mapping.sourceField];
   if (rawValue === undefined || rawValue === null) return undefined;
 
+  // Always normalize timezones from IANA → Freshservice label regardless of stored transform.
+  // This fixes existing migrations that have time_zone mapped with transform: 'direct'.
+  if (mapping.targetField === 'time_zone') {
+    return TIMEZONE_MAP[val(rawValue)] ?? undefined;
+  }
+
+  // Always cast vip_user to a native boolean regardless of stored transform.
+  if (mapping.targetField === 'vip_user') {
+    const v = val(rawValue);
+    return v === 'true' || v === true || v === '1' || v === 1;
+  }
+
   const transformFn = TRANSFORMS[mapping.transform];
   if (!transformFn) return val(rawValue);
-  return transformFn(rawValue);
+  return transformFn(rawValue, context);
 }
 
 /**
  * Apply all field mappings to a source record, returning a target object.
  * Handles custom_fields.* targets by writing into target.custom_fields sub-object.
+ * @param {object} context - Optional context forwarded to transforms (e.g. { roles: fsRoles })
  */
-export function applyMappings(sourceRecord, fieldMappings) {
+export function applyMappings(sourceRecord, fieldMappings, context = {}) {
   const target = {};
   for (const mapping of fieldMappings) {
     if (!mapping.targetField || !mapping.sourceField) continue;
-    const value = applyTransform(sourceRecord, mapping);
+    const value = applyTransform(sourceRecord, mapping, context);
     if (value === undefined) continue;
 
     if (mapping.targetField.startsWith('custom_fields.')) {

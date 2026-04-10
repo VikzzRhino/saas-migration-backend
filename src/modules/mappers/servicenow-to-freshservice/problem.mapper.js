@@ -39,9 +39,11 @@ export function mapProblem(snow, context = {}) {
     priority: PRIORITY_MAP[Number(val(snow.priority))] ?? 2,
     status: STATUS_MAP[Number(val(snow.state))] ?? 1,
     impact: IMPACT_MAP[Number(val(snow.impact))] ?? 2,
-    due_by: toISO(val(snow.due_date)) ?? null,
     known_error: val(snow.known_error) === 'true',
   };
+
+  const dueBy = toISO(val(snow.due_date));
+  if (dueBy) mapped.due_by = dueBy;
 
   const category = displayVal(snow.category);
   if (category) mapped.category = category;

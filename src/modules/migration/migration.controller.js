@@ -120,7 +120,7 @@ export async function updateMigration(req, res) {
   });
   if (!migration) return res.status(404).json({ error: 'Migration not found' });
 
-  const allowedFields = ['name', 'objectConfig', 'source', 'target'];
+  const allowedFields = ['name', 'objectConfig', 'source', 'target', 'workspaceId'];
   const updates = {};
   for (const field of allowedFields) {
     if (req.body[field] !== undefined) updates[field] = req.body[field];
@@ -270,6 +270,11 @@ export async function preflightEstimate(req, res) {
     kb_articles:   3,
   };
 
+  // objectConfig from query params (frontend toggles) or fall back to saved migration config
+  const cfg = req.query.objectConfig
+    ? JSON.parse(req.query.objectConfig)
+    : migration.objectConfig?.toObject?.() ?? migration.objectConfig ?? {};
+
   const warnings = [];
   const connections = {
     serviceNow:   { valid: false },
@@ -277,13 +282,13 @@ export async function preflightEstimate(req, res) {
   };
 
   // SN connection check
-  let counts;
+  let allCounts;
   try {
     const source = createSourceConnector(
       migration.source.system,
       migration.source.credentials
     );
-    counts = await source.countAll();
+    allCounts = await source.countAll();
     connections.serviceNow.valid = true;
   } catch {
     return res.json({
@@ -316,7 +321,27 @@ export async function preflightEstimate(req, res) {
     });
   }
 
-  if (Object.values(counts).every((c) => c === 0)) {
+  // Map SN count keys to objectConfig keys
+  const COUNT_TO_CONFIG = {
+    incidents:     'incidents',
+    changes:       'changes',
+    problems:      'problems',
+    users:         'users',
+    admins:        'admins',
+    companies:     'companies',
+    kb_categories: 'kb_categories',
+    kb_articles:   'kb_articles',
+  };
+
+  // Filter counts to only enabled objects
+  const counts = Object.fromEntries(
+    Object.entries(allCounts).map(([key, count]) => [
+      key,
+      cfg[COUNT_TO_CONFIG[key]] === false ? 0 : count,
+    ])
+  );
+
+  if (Object.values(allCounts).every((c) => c === 0)) {
     warnings.push('No records found in ServiceNow');
   }
 
@@ -332,10 +357,11 @@ export async function preflightEstimate(req, res) {
     totalRecords,
     estimatedRequests,
     estimatedMinutes,
-    breakdown: Object.entries(counts).map(([key, count]) => ({
+    breakdown: Object.entries(allCounts).map(([key, count]) => ({
       object: key,
       count,
-      estimatedRequests: count * (WEIGHTS[key] ?? 1),
+      enabled: cfg[COUNT_TO_CONFIG[key]] !== false,
+      estimatedRequests: (cfg[COUNT_TO_CONFIG[key]] !== false ? count : 0) * (WEIGHTS[key] ?? 1),
     })),
     connections,
     warnings,
@@ -1759,7 +1785,70 @@ export async function updateRetentionPolicy(req, res) {
   });
 }
 
-// ── Run Single Object ─────────────────────────────────────────────────────────
+// ── Migration Readiness Summary ─────────────────────────────────────────────
+
+export async function getMigrationReadiness(req, res) {
+  const migration = await Migration.findOne(
+    { _id: req.params.id, tenantId: req.tenant._id },
+    'fieldMappings objectConfig sourceSchemas'
+  );
+  if (!migration) return res.status(404).json({ error: 'Migration not found' });
+
+  const cfg = migration.objectConfig?.toObject?.() ?? migration.objectConfig ?? {};
+
+  const REQUIRED_FIELDS = {
+    incidents:     ['subject', 'description', 'priority', 'status'],
+    changes:       ['subject', 'description', 'priority', 'status', 'change_type', 'planned_start_date', 'planned_end_date'],
+    problems:      ['subject', 'description', 'priority', 'status'],
+    users:         ['first_name', 'primary_email'],
+    // admins: first_name/email are always hardcoded in mapAgent() — no source schema to map from
+    admins:        [],
+    companies:     ['name'],
+    // kb_articles: folder_id is runtime-resolved by the KB orchestrator, not field-mapped
+    kb_articles:   ['title', 'description'],
+  };
+
+  const summary = {};
+
+  for (const [object, required] of Object.entries(REQUIRED_FIELDS)) {
+    if (cfg[object] === false) continue;
+
+    const mappings = migration.fieldMappings?.[object] ?? [];
+    const sourceFields = migration.sourceSchemas?.[object] ?? [];
+
+    const mappedFields    = mappings.filter((m) => m.sourceField && m.targetField);
+    const unmappedFields  = mappings.filter((m) => !m.sourceField && m.targetField);
+    const coveredTargets  = new Set(mappedFields.map((m) => m.targetField));
+
+    const missingRequired = required.filter((f) => !coveredTargets.has(f));
+    const resolveFields   = mappedFields.filter((m) =>
+      ['resolve_requester', 'resolve_agent', 'resolve_group', 'resolve_department'].includes(m.transform)
+    );
+
+    summary[object] = {
+      enabled:          true,
+      totalSourceFields: sourceFields.length,
+      mappedCount:      mappedFields.length,
+      unmappedCount:    unmappedFields.length,
+      requiredFields:   required,
+      missingRequired,
+      ready:            missingRequired.length === 0,
+      resolveFields:    resolveFields.map((m) => ({ source: m.sourceField, target: m.targetField, transform: m.transform })),
+      willMigrate: {
+        coreFields:       mappedFields.filter((m) => !['resolve_requester','resolve_agent','resolve_group','resolve_department'].includes(m.transform)).length,
+        referenceFields:  resolveFields.length,
+        customFields:     mappedFields.filter((m) => m.targetField?.startsWith('custom_fields.')).length,
+      },
+    };
+  }
+
+  const allReady   = Object.values(summary).every((s) => s.ready);
+  const totalMapped = Object.values(summary).reduce((a, s) => a + s.mappedCount, 0);
+  const totalMissing = Object.values(summary).reduce((a, s) => a + s.missingRequired.length, 0);
+
+  res.json({ allReady, totalMapped, totalMissing, objects: summary });
+}
+
 
 const VALID_OBJECTS = ['companies', 'users', 'admins', 'incidents', 'changes', 'problems', 'kb_categories', 'kb_articles'];
 

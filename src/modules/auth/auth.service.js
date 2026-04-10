@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import User from './user.model.js';
 import Otp from './otp.model.js';
+import Tenant from '../tenants/tenant.model.js';
 import { sendOtpEmail } from './mail.service.js';
 
 const COOKIE_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days in ms
@@ -49,12 +50,25 @@ export async function verifyEmail({ email, otp }) {
   const valid = await bcrypt.compare(otp, record.otpHash);
   if (!valid) throw { status: 400, message: 'Invalid OTP' };
 
-  const user = await User.findOneAndUpdate({ email }, { isVerified: true }, { new: true });
+  let user = await User.findOne({ email });
   if (!user) throw { status: 404, message: 'User not found' };
 
+  // Create tenant if not already linked
+  if (!user.tenantId) {
+    const tenant = await Tenant.create({ name: user.fullName || user.email });
+    user.tenantId = tenant._id;
+  }
+  user.isVerified = true;
+  await user.save();
+
   await Otp.deleteOne({ email });
+  const tenant = await Tenant.findById(user.tenantId);
   const token = generateToken(user._id);
-  return { token, user: { _id: user._id, fullName: user.fullName, email: user.email, isVerified: user.isVerified } };
+  return {
+    token,
+    user: { _id: user._id, fullName: user.fullName, email: user.email, isVerified: user.isVerified },
+    apiKey: tenant?.apiKey ?? null,
+  };
 }
 
 export async function login({ email, password }) {
@@ -64,6 +78,7 @@ export async function login({ email, password }) {
   const match = await bcrypt.compare(password, user.password);
   if (!match) throw { status: 401, message: 'Invalid credentials' };
 
+  const tenant = user.tenantId ? await Tenant.findById(user.tenantId) : null;
   const token = generateToken(user._id);
   return {
     token,
@@ -73,6 +88,7 @@ export async function login({ email, password }) {
       email: user.email,
       isVerified: user.isVerified,
     },
+    apiKey: tenant?.apiKey ?? null,
   };
 }
 

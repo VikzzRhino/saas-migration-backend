@@ -18,8 +18,6 @@ const KNOWN_MAPPINGS = {
     opened_at: { target: 'created_at', transform: 'datetime' },
     sys_created_on: { target: 'created_at', transform: 'datetime' },
     sys_updated_on: { target: 'updated_at', transform: 'datetime' },
-    resolved_at: { target: 'closed_at', transform: 'datetime' },
-    closed_at: { target: 'closed_at', transform: 'datetime' },
   },
   changes: {
     short_description: { target: 'subject', transform: 'direct' },
@@ -35,13 +33,8 @@ const KNOWN_MAPPINGS = {
     assigned_to: { target: 'agent_id', transform: 'resolve_agent' },
     requested_by: { target: 'requester_id', transform: 'resolve_requester' },
     category: { target: 'category', transform: 'direct' },
-    reason: { target: 'planning_reason', transform: 'direct' },
-    justification: { target: 'planning_impact', transform: 'direct' },
-    implementation_plan: { target: 'planning_rollout', transform: 'direct' },
-    backout_plan: { target: 'planning_backout', transform: 'direct' },
     opened_at: { target: 'created_at', transform: 'datetime' },
     sys_updated_on: { target: 'updated_at', transform: 'datetime' },
-    closed_at: { target: 'closed_at', transform: 'datetime' },
   },
   problems: {
     short_description: { target: 'subject', transform: 'direct' },
@@ -57,7 +50,6 @@ const KNOWN_MAPPINGS = {
     category: { target: 'category', transform: 'direct' },
     opened_at: { target: 'created_at', transform: 'datetime' },
     sys_updated_on: { target: 'updated_at', transform: 'datetime' },
-    closed_at: { target: 'closed_at', transform: 'datetime' },
   },
   users: {
     first_name: { target: 'first_name', transform: 'direct' },
@@ -67,8 +59,8 @@ const KNOWN_MAPPINGS = {
     mobile_phone: { target: 'mobile_phone_number', transform: 'direct' },
     department: { target: 'department_id', transform: 'resolve_department' },
     title: { target: 'job_title', transform: 'direct' },
-    time_zone: { target: 'time_zone', transform: 'direct' },
-    vip: { target: 'vip_user', transform: 'direct' },
+    time_zone: { target: 'time_zone', transform: 'timezone_map' },
+    vip: { target: 'vip_user', transform: 'boolean_cast' },
     location: { target: 'location_id', transform: 'resolve_department' },
   },
   admins: {

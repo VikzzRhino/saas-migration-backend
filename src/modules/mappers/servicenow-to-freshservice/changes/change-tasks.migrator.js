@@ -99,29 +99,29 @@ export async function migrateChangeTasks(snowChangeId, freshChangeId, context) {
     const status = TASK_STATUS_MAP[stateDisplay] ?? 1;
 
     const payload = {
-      task: {
-        title: rawTitle.trim() || 'Migrated Task',
-        status,
-        notify_before: 0,
-        description,
-      },
+      title: rawTitle.trim() || 'Migrated Task',
+      status,
+      notify_before: 0,
+      description,
     };
 
     const dueDate = toISO(task.due_date);
-    if (dueDate) payload.task.due_date = dueDate;
+    if (dueDate && new Date(dueDate) > new Date()) {
+      payload.due_date = dueDate;
+    }
 
     // Resolve agent_id
     const assignedToDisplay = displayVal(task.assigned_to);
     if (assignedToDisplay && agentEmailToId) {
       const agentId = agentEmailToId.get(assignedToDisplay);
-      if (agentId !== undefined) payload.task.agent_id = agentId;
+      if (agentId !== undefined) payload.agent_id = agentId;
     }
 
     // Resolve group_id
     const groupDisplay = displayVal(task.assignment_group);
     if (groupDisplay && groupNameToId) {
       const groupId = groupNameToId.get(groupDisplay);
-      if (groupId !== undefined) payload.task.group_id = groupId;
+      if (groupId !== undefined) payload.group_id = groupId;
     }
 
     // Step 3 — POST to Freshservice
@@ -138,8 +138,11 @@ export async function migrateChangeTasks(snowChangeId, freshChangeId, context) {
       );
       summary.migrated++;
     } catch (err) {
+      const fsError = err?.response?.data;
       logger.error(
-        `[change-tasks] Failed to post task snow_sys_id=${snowSysId}: ${err.message}`
+        `[change-tasks] Failed to post task snow_sys_id=${snowSysId}: ${
+          err.message
+        }${fsError ? ' | FS response: ' + JSON.stringify(fsError) : ''}`
       );
       summary.failed++;
     }

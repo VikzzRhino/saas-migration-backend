@@ -9,6 +9,7 @@ const userSchema = new mongoose.Schema(
     email: { type: String, lowercase: true },
     password: { type: String, select: false },
     isVerified: { type: Boolean, default: true },
+    tenantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', default: null },
   },
   { timestamps: true }
 );

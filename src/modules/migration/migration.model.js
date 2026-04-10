@@ -92,6 +92,7 @@ const migrationSchema = new mongoose.Schema(
       system: { type: String },
       credentials: { type: mongoose.Schema.Types.Mixed },
     },
+    workspaceId: { type: String, default: null },
     status: {
       type: String,
       enum: [
