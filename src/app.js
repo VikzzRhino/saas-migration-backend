@@ -19,7 +19,18 @@ app.use(morgan('dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
 
-app.get('/health', (req, res) => res.json({ status: 'ok' }));
+app.get('/', (req, res) =>
+  res.json({
+    status: 'ok',
+    message: 'API is running and SaaS migration backend is all set and ready.',
+  })
+);
+app.get('/health', (req, res) =>
+  res.json({
+    status: 'ok',
+    message: 'API is running and SaaS migration backend is all set and ready.',
+  })
+);
 app.use('/api/auth', authRoutes);
 app.use('/api/tenants', tenantRoutes);
 app.use('/api/migrations', migrationRoutes);
