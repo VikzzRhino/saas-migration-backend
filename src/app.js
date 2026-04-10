@@ -12,37 +12,17 @@ import adminRoutes from './modules/admin/admin.routes.js';
 
 const app = express();
 
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(
   cors({
-    origin: true, // reflect request origin (works as "allow all" with credentials)
+    origin: (origin, cb) => cb(null, origin ?? '*'),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: [
-      'Origin',
-      'X-Requested-With',
-      'Content-Type',
-      'Accept',
-      'Authorization',
-    ],
+    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'x-api-key'],
+    optionsSuccessStatus: 204,
   })
 );
-app.use((req, res, next) => {
-  // Extra safeguard for proxies/load balancers that can interfere with preflight headers.
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.header('Vary', 'Origin');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header(
-    'Access-Control-Allow-Headers',
-    'Origin, X-Requested-With, Content-Type, Accept, Authorization'
-  );
-  res.header(
-    'Access-Control-Allow-Methods',
-    'GET,POST,PUT,PATCH,DELETE,OPTIONS'
-  );
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
-  next();
-});
+app.options('*', cors());
 app.use(morgan('dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
