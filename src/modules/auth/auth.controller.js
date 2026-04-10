@@ -51,9 +51,9 @@ export async function verifyEmail(req, res) {
   const parsed = verifyEmailSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   try {
-    const { token, user } = await authService.verifyEmail(parsed.data);
+    const { token, user, apiKey } = await authService.verifyEmail(parsed.data);
     res.cookie('access_token', token, authService.cookieOptions());
-    res.json({ message: 'Email verified successfully', user });
+    res.json({ message: 'Email verified successfully', user, apiKey });
   } catch (err) {
     res.status(err.status ?? 500).json({ error: err.message });
   }
@@ -63,9 +63,9 @@ export async function login(req, res) {
   const parsed = loginSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   try {
-    const { token, user } = await authService.login(parsed.data);
+    const { token, user, apiKey } = await authService.login(parsed.data);
     res.cookie('access_token', token, authService.cookieOptions());
-    res.json({ message: 'Logged in successfully', user });
+    res.json({ message: 'Logged in successfully', user, apiKey });
   } catch (err) {
     res.status(err.status ?? 500).json({ error: err.message });
   }
